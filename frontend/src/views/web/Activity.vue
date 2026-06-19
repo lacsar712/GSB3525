@@ -14,7 +14,14 @@
                 </div>
                 <div class="mt-4 flex flex-wrap justify-end gap-2">
                     <el-button type="info" plain size="small" @click="handleSign(act)">我要报名</el-button>
-                    <el-button type="primary" size="small" @click="handleAttend(act)">现场签到</el-button>
+                    <el-button
+                        type="primary"
+                        size="small"
+                        :loading="!!loadingMap[act.id]"
+                        :disabled="attendedSet.has(act.id)"
+                        @click="handleAttend(act)">
+                        {{ attendedSet.has(act.id) ? '已签到' : '现场签到' }}
+                    </el-button>
                 </div>
             </el-card>
         </div>
@@ -23,12 +30,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, reactive, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import request from '../../utils/request';
 
 const list = ref([]);
 const loading = ref(false);
+const loadingMap = reactive({});
+const attendedSet = ref(new Set());
 const userInfo = JSON.parse(localStorage.getItem('userInfo') || '{}');
 
 const fetchData = async () => {
@@ -38,6 +47,17 @@ const fetchData = async () => {
         list.value = res.data || [];
     } finally {
         loading.value = false;
+    }
+};
+
+const fetchAttended = async () => {
+    if (!userInfo.id) return;
+    try {
+        const res = await request.get('/activity/attended', { params: { seniorId: userInfo.id } });
+        const ids = Array.isArray(res.data) ? res.data : [];
+        attendedSet.value = new Set(ids);
+    } catch (e) {
+        // silently ignore
     }
 };
 
@@ -52,13 +72,25 @@ const handleSign = (act) => {
 };
 
 const handleAttend = async (act) => {
+    if (attendedSet.value.has(act.id)) return;
+    if (loadingMap[act.id]) return;
+    loadingMap[act.id] = true;
     try {
         await request.post('/activity/attend', { activityId: act.id, seniorId: userInfo.id });
+        attendedSet.value.add(act.id);
+        const points = (userInfo.points || 0) + (act.rewardPoints || 0);
+        userInfo.points = points;
+        localStorage.setItem('userInfo', JSON.stringify(userInfo));
         ElMessage.success(`签到成功！获得 ${act.rewardPoints} 积分`);
     } catch (e) {
-        // Error is handled by global interceptor usually
+        // duplicate / error message already shown by global interceptor
+    } finally {
+        loadingMap[act.id] = false;
     }
 };
 
-onMounted(() => fetchData());
+onMounted(async () => {
+    await fetchData();
+    await fetchAttended();
+});
 </script>
