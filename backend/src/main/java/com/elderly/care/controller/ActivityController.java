@@ -5,11 +5,12 @@ import com.elderly.care.service.ActivityService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/activity")
 public class ActivityController {
     @Autowired private ActivityService activityService;
-    @Autowired private com.elderly.care.mapper.UserMapper userMapper;
 
     @GetMapping("/list")
     public Result<?> list() { 
@@ -22,19 +23,23 @@ public class ActivityController {
         return Result.success();
     }
 
+    @GetMapping("/attended")
+    public Result<?> attended(@RequestParam Long seniorId) {
+        List<Long> ids = activityService.getAttendedActivityIds(seniorId);
+        return Result.success(ids);
+    }
+
     @PostMapping("/attend")
-    @org.springframework.transaction.annotation.Transactional
     public Result<?> attend(@RequestBody java.util.Map<String, Object> req) {
         Long activityId = Long.valueOf(req.get("activityId").toString());
         Long seniorId = Long.valueOf(req.get("seniorId").toString());
-        
-        Activity activity = activityService.getById(activityId);
-        if (activity == null) return Result.error("活动不存在");
-        
-        com.elderly.care.entity.User user = userMapper.selectById(seniorId);
-        if (user != null && activity.getRewardPoints() != null && activity.getRewardPoints() > 0) {
-            user.setPoints( (user.getPoints() == null ? 0 : user.getPoints()) + activity.getRewardPoints() );
-            userMapper.updateById(user);
+
+        int result = activityService.attendActivity(activityId, seniorId);
+        if (result == 0) {
+            return Result.error("活动不存在");
+        }
+        if (result == -1) {
+            return Result.error(409, "您已签到过该活动，不可重复签到");
         }
         return Result.success("签到成功，已发放积分");
     }
