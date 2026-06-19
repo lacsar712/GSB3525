@@ -14,7 +14,15 @@
                 </div>
                 <div class="mt-4 flex flex-wrap justify-end gap-2">
                     <el-button type="info" plain size="small" @click="handleSign(act)">我要报名</el-button>
-                    <el-button type="primary" size="small" @click="handleAttend(act)">现场签到</el-button>
+                    <el-button
+                        v-if="!attendedIds.has(act.id)"
+                        type="primary"
+                        size="small"
+                        :loading="attendingId === act.id"
+                        :disabled="attendingId === act.id"
+                        @click="handleAttend(act)"
+                    >现场签到</el-button>
+                    <el-button v-else type="success" size="small" disabled>已签到</el-button>
                 </div>
             </el-card>
         </div>
@@ -29,6 +37,8 @@ import request from '../../utils/request';
 
 const list = ref([]);
 const loading = ref(false);
+const attendedIds = ref(new Set());
+const attendingId = ref(null);
 const userInfo = JSON.parse(localStorage.getItem('userInfo') || '{}');
 
 const fetchData = async () => {
@@ -38,6 +48,16 @@ const fetchData = async () => {
         list.value = res.data || [];
     } finally {
         loading.value = false;
+    }
+};
+
+const fetchAttendedRecords = async () => {
+    if (!userInfo.id) return;
+    try {
+        const res = await request.get('/activity/records', { params: { seniorId: userInfo.id } });
+        attendedIds.value = new Set(res.data || []);
+    } catch (e) {
+        console.error('Failed to fetch attendance records', e);
     }
 };
 
@@ -52,13 +72,27 @@ const handleSign = (act) => {
 };
 
 const handleAttend = async (act) => {
+    if (attendedIds.value.has(act.id)) {
+        ElMessage.warning('您已签到过该活动');
+        return;
+    }
+    if (attendingId.value === act.id) return;
+    attendingId.value = act.id;
     try {
-        await request.post('/activity/attend', { activityId: act.id, seniorId: userInfo.id });
-        ElMessage.success(`签到成功！获得 ${act.rewardPoints} 积分`);
+        const res = await request.post('/activity/attend', { activityId: act.id, seniorId: userInfo.id });
+        attendedIds.value.add(act.id);
+        ElMessage.success(res.message || `签到成功！获得 ${act.rewardPoints} 积分`);
     } catch (e) {
-        // Error is handled by global interceptor usually
+        if (typeof e === 'string' && e.includes('重复签到')) {
+            attendedIds.value.add(act.id);
+        }
+    } finally {
+        attendingId.value = null;
     }
 };
 
-onMounted(() => fetchData());
+onMounted(async () => {
+    await fetchData();
+    await fetchAttendedRecords();
+});
 </script>
