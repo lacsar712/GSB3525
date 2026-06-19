@@ -14,7 +14,14 @@
                 </div>
                 <div class="mt-4 flex flex-wrap justify-end gap-2">
                     <el-button type="info" plain size="small" @click="handleSign(act)">我要报名</el-button>
-                    <el-button type="primary" size="small" @click="handleAttend(act)">现场签到</el-button>
+                    <el-button
+                        type="primary"
+                        size="small"
+                        :loading="attendingIds.has(act.id)"
+                        :disabled="attendingIds.has(act.id) || attendedIds.has(act.id)"
+                        @click="handleAttend(act)">
+                        {{ attendedIds.has(act.id) ? '已签到' : '现场签到' }}
+                    </el-button>
                 </div>
             </el-card>
         </div>
@@ -23,13 +30,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, reactive, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import request from '../../utils/request';
 
 const list = ref([]);
 const loading = ref(false);
 const userInfo = JSON.parse(localStorage.getItem('userInfo') || '{}');
+
+// 正在签到中的活动 id 集合（防止重复点击）
+const attendingIds = reactive(new Set());
+// 已成功签到的活动 id 集合（按钮禁用并显示"已签到"）
+const attendedIds = reactive(new Set());
 
 const fetchData = async () => {
     loading.value = true;
@@ -52,11 +64,29 @@ const handleSign = (act) => {
 };
 
 const handleAttend = async (act) => {
+    if (!userInfo || !userInfo.id) {
+        ElMessage.warning('请先登录后再进行签到');
+        return;
+    }
+    // 已签到或正在签到则直接返回，避免重复点击
+    if (attendedIds.has(act.id) || attendingIds.has(act.id)) {
+        return;
+    }
+    attendingIds.add(act.id);
     try {
-        await request.post('/activity/attend', { activityId: act.id, seniorId: userInfo.id });
-        ElMessage.success(`签到成功！获得 ${act.rewardPoints} 积分`);
+        const res = await request.post('/activity/attend', { activityId: act.id, seniorId: userInfo.id });
+        const reward = (res && res.data && res.data.rewardPoints) || act.rewardPoints || 0;
+        ElMessage.success(reward > 0 ? `签到成功！获得 ${reward} 积分` : '签到成功');
+        attendedIds.add(act.id);
     } catch (e) {
-        // Error is handled by global interceptor usually
+        // 后端通过 code=409 表示重复签到，全局拦截器已弹出错误信息
+        // 若是重复签到，标记为已签到，避免再次点击
+        const msg = (e && (e.message || e)) + '';
+        if (msg.indexOf('重复签到') !== -1 || msg.indexOf('已签到') !== -1) {
+            attendedIds.add(act.id);
+        }
+    } finally {
+        attendingIds.delete(act.id);
     }
 };
 
